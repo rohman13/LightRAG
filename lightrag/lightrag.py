@@ -5,6 +5,7 @@ from datetime import datetime
 from functools import partial
 from typing import Type, cast, Any
 from transformers import AutoModel,AutoTokenizer, AutoModelForCausalLM
+from typing import AsyncGenerator
 
 from .llm import gpt_4o_complete, gpt_4o_mini_complete, openai_embedding,hf_model_complete,hf_embedding
 from .operate import (
@@ -247,9 +248,9 @@ class LightRAG:
         loop = always_get_an_event_loop()
         return loop.run_until_complete(self.aquery(query, param))
     
-    async def aquery(self, query: str, param: QueryParam = QueryParam()):
+    async def aquery(self, query: str, param: QueryParam = QueryParam()) -> AsyncGenerator[str, None]:
         if param.mode == "local":
-            response = await local_query(
+            async for chunk in local_query(
                 query,
                 self.chunk_entity_relation_graph,
                 self.entities_vdb,
@@ -257,9 +258,11 @@ class LightRAG:
                 self.text_chunks,
                 param,
                 asdict(self),
-            )
+            ):
+                if chunk is not None:
+                    yield chunk
         elif param.mode == "global":
-            response = await global_query(
+            async for chunk in global_query(
                 query,
                 self.chunk_entity_relation_graph,
                 self.entities_vdb,
@@ -267,9 +270,11 @@ class LightRAG:
                 self.text_chunks,
                 param,
                 asdict(self),
-            )
+            ):
+                if chunk is not None:
+                    yield chunk
         elif param.mode == "hybrid":
-            response = await hybrid_query(
+            async for chunk in hybrid_query(
                 query,
                 self.chunk_entity_relation_graph,
                 self.entities_vdb,
@@ -277,20 +282,27 @@ class LightRAG:
                 self.text_chunks,
                 param,
                 asdict(self),
-            )
+            ):
+                if chunk is not None:
+                    yield chunk
         elif param.mode == "naive":
-            response = await naive_query(
+            async for chunk in naive_query(
                 query,
                 self.chunks_vdb,
                 self.text_chunks,
                 param,
                 asdict(self),
-            )
+            ):
+                if chunk is not None:
+                    yield chunk
         else:
             raise ValueError(f"Unknown mode {param.mode}")
         await self._query_done()
-        return response
     
+    async def query_stream(self, query, param):
+        async for chunk in self.aquery(query, param):
+            if chunk is not None:
+                yield chunk
 
     async def _query_done(self):
         tasks = []

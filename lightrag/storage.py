@@ -103,7 +103,10 @@ class NanoVectorDBStorage(BaseVectorStorage):
         return results
 
     async def query(self, query: str, top_k=5):
-        embedding = await self.embedding_func([query])
+        embeddings = []
+        # Collect the embeddings from the async generator
+        async for embedding in self.embedding_func([query]):
+            embeddings.append(embedding)
         embedding = embedding[0]
         results = self._client.query(
             query=embedding,

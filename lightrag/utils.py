@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from functools import wraps
 from hashlib import md5
 from typing import Any, Union
+import inspect
 
 import numpy as np
 import tiktoken
@@ -65,7 +66,7 @@ def limit_async_func_call(max_size: int, waitting_time: float = 0.0001):
     """Add restriction of maximum async calling times for a async func"""
 
     def final_decro(func):
-        """Not using async.Semaphore to aovid use nest-asyncio"""
+        """Not using async.Semaphore to avoid using nest-asyncio"""
         __current_size = 0
 
         @wraps(func)
@@ -74,9 +75,15 @@ def limit_async_func_call(max_size: int, waitting_time: float = 0.0001):
             while __current_size >= max_size:
                 await asyncio.sleep(waitting_time)
             __current_size += 1
-            result = await func(*args, **kwargs)
-            __current_size -= 1
-            return result
+            try:
+                if inspect.isasyncgenfunction(func):
+                    async for item in func(*args, **kwargs):
+                        yield item
+                else:
+                    result = await func(*args, **kwargs)
+                    yield result
+            finally:
+                __current_size -= 1
 
         return wait_func
 

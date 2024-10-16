@@ -391,12 +391,21 @@ async def local_query(
 
     kw_prompt_temp = PROMPTS["keywords_extraction"]
     kw_prompt = kw_prompt_temp.format(query=query)
-    result = await use_model_func(kw_prompt)
+    print("kw_prompt",kw_prompt)
+    result = []
+    async for item in use_model_func(kw_prompt):
+        print("item",item)
+        result.append(item)
+    result = ''.join(result)
+    print("result",result)
     
     try:
         keywords_data = json.loads(result)
+        
         keywords = keywords_data.get("low_level_keywords", [])
         keywords = ', '.join(keywords)
+        print("keywords",keywords)
+
     except json.JSONDecodeError as e:
         try:
             result = result.replace(kw_prompt[:-1],'').replace('user','').replace('model','').strip().strip('```').strip('json')
@@ -406,7 +415,8 @@ async def local_query(
         # Handle parsing error
         except json.JSONDecodeError as e:
             print(f"JSON parsing error: {e}")
-            return PROMPTS["fail_response"]
+            yield PROMPTS["fail_response"]
+    
     context = await _build_local_query_context(
         keywords,
         knowledge_graph_inst,
@@ -414,22 +424,26 @@ async def local_query(
         text_chunks_db,
         query_param,
     )
+        
     if query_param.only_need_context:
-        return context
+        yield context
     if context is None:
-        return PROMPTS["fail_response"]
+        yield PROMPTS["fail_response"]
     sys_prompt_temp = PROMPTS["rag_response"]
     sys_prompt = sys_prompt_temp.format(
         context_data=context, response_type=query_param.response_type
     )
-    response = await use_model_func(
+
+    async for item in use_model_func(
         query,
         system_prompt=sys_prompt,
-    )
-    if len(response)>len(sys_prompt):
-        response = response.replace(sys_prompt,'').replace('user','').replace('model','').replace(query,'').replace('<system>','').replace('</system>','').strip()
-    
-    return response
+    ):
+        if item is not None:
+            yield item
+    # print("response",response)
+    # if len(response)>len(sys_prompt):
+    #     response = response.replace(sys_prompt,'').replace('user','').replace('model','').replace(query,'').replace('<system>','').replace('</system>','').strip()
+    # return response
 
 async def _build_local_query_context(
     query,
@@ -618,7 +632,10 @@ async def global_query(
 
     kw_prompt_temp = PROMPTS["keywords_extraction"]
     kw_prompt = kw_prompt_temp.format(query=query)
-    result = await use_model_func(kw_prompt)
+    result = []
+    async for item in use_model_func(kw_prompt):
+        result.append(item)
+    result = ''.join(result)
     
     try:
         keywords_data = json.loads(result)
@@ -634,7 +651,7 @@ async def global_query(
         except json.JSONDecodeError as e:
             # Handle parsing error
             print(f"JSON parsing error: {e}")
-            return PROMPTS["fail_response"]
+            yield PROMPTS["fail_response"]
 
     context = await _build_global_query_context(
         keywords,
@@ -646,22 +663,24 @@ async def global_query(
     )
    
     if query_param.only_need_context:
-        return context
+        yield context
     if context is None:
-        return PROMPTS["fail_response"]
+        yield PROMPTS["fail_response"]
     
     sys_prompt_temp = PROMPTS["rag_response"]
     sys_prompt = sys_prompt_temp.format(
         context_data=context, response_type=query_param.response_type
     )
-    response = await use_model_func(
+    async for item in use_model_func(
         query,
         system_prompt=sys_prompt,
-    )
-    if len(response)>len(sys_prompt):
-        response = response.replace(sys_prompt,'').replace('user','').replace('model','').replace(query,'').replace('<system>','').replace('</system>','').strip()
+    ):
+        if item is not None:
+            yield item
+    # if len(response)>len(sys_prompt):
+    #     response = response.replace(sys_prompt,'').replace('user','').replace('model','').replace(query,'').replace('<system>','').replace('</system>','').strip()
     
-    return response
+    # return response
 
 async def _build_global_query_context(
     keywords,
@@ -841,7 +860,10 @@ async def hybrid_query(
     kw_prompt_temp = PROMPTS["keywords_extraction"]
     kw_prompt = kw_prompt_temp.format(query=query)
     
-    result = await use_model_func(kw_prompt)
+    result = []
+    async for item in use_model_func(kw_prompt):
+        result.append(item)
+    result = ''.join(result)
     try:
         keywords_data = json.loads(result)
         hl_keywords = keywords_data.get("high_level_keywords", [])
@@ -859,7 +881,7 @@ async def hybrid_query(
         # Handle parsing error
         except json.JSONDecodeError as e:
             print(f"JSON parsing error: {e}")
-            return PROMPTS["fail_response"]
+            yield PROMPTS["fail_response"]
 
     low_level_context = await _build_local_query_context(
         ll_keywords,
@@ -881,21 +903,23 @@ async def hybrid_query(
     context = combine_contexts(high_level_context, low_level_context)
 
     if query_param.only_need_context:
-        return context
+        yield context
     if context is None:
-        return PROMPTS["fail_response"]
+        yield PROMPTS["fail_response"]
     
     sys_prompt_temp = PROMPTS["rag_response"]
     sys_prompt = sys_prompt_temp.format(
         context_data=context, response_type=query_param.response_type
     )
-    response = await use_model_func(
+    async for item in use_model_func(
         query,
         system_prompt=sys_prompt,
-    )
-    if len(response)>len(sys_prompt):
-        response = response.replace(sys_prompt,'').replace('user','').replace('model','').replace(query,'').replace('<system>','').replace('</system>','').strip()
-    return response
+    ):
+        if item is not None:
+            yield item
+    # if len(response)>len(sys_prompt):
+    #     response = response.replace(sys_prompt,'').replace('user','').replace('model','').replace(query,'').replace('<system>','').replace('</system>','').strip()
+    # return response
 
 def combine_contexts(high_level_context, low_level_context):
     # Function to extract entities, relationships, and sources from context strings
@@ -961,7 +985,7 @@ async def naive_query(
     use_model_func = global_config["llm_model_func"]
     results = await chunks_vdb.query(query, top_k=query_param.top_k)
     if not len(results):
-        return PROMPTS["fail_response"]
+        yield PROMPTS["fail_response"]
     chunks_ids = [r["id"] for r in results]
     chunks = await text_chunks_db.get_by_ids(chunks_ids)
 
@@ -973,18 +997,21 @@ async def naive_query(
     logger.info(f"Truncate {len(chunks)} to {len(maybe_trun_chunks)} chunks")
     section = "--New Chunk--\n".join([c["content"] for c in maybe_trun_chunks])
     if query_param.only_need_context:
-        return section
+        yield section
     sys_prompt_temp = PROMPTS["naive_rag_response"]
     sys_prompt = sys_prompt_temp.format(
         content_data=section, response_type=query_param.response_type
     )
-    response = await use_model_func(
+
+    async for item in use_model_func(
         query,
         system_prompt=sys_prompt,
-    )
+    ):
+        if item is not None:
+            yield item
 
-    if len(response)>len(sys_prompt):
-        response = response[len(sys_prompt):].replace(sys_prompt,'').replace('user','').replace('model','').replace(query,'').replace('<system>','').replace('</system>','').strip()
+    # if len(response)>len(sys_prompt):
+    #     response = response[len(sys_prompt):].replace(sys_prompt,'').replace('user','').replace('model','').replace(query,'').replace('<system>','').replace('</system>','').strip()
     
-    return response
+    # return response
 
